@@ -22,7 +22,7 @@ WIP
 
 ## Project structure
 
-> [!note] Terminology
+> [!note]
 > _Workers_ are permanently assigned to OS threads.
 > _Threads_ are lightweight units of work created and executed by workers, and managed by the scheduler.
 

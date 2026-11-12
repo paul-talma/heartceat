@@ -1,5 +1,5 @@
 CC := clang
-CFLAGS := -O0 -Wall -Wextra -pthread -flto
+CFLAGS := -O3 -Wall -Wextra -pthread -flto
 LDFLAGS := -Wl,-stack_size,0x4000000
 
 BUILD := build
