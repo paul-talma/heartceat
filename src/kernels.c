@@ -42,6 +42,7 @@ static u64 fj_sum(struct node *node, size_t depth, size_t max_depth) {
     if (!node->right) { // don't fork on NULL branch
         return fj_sum(node->left, depth + 1, max_depth) + node->val;
     }
+    // create job
     sum_arg a = {
         .node = node->right,
         .depth = depth + 1,
@@ -104,9 +105,9 @@ static u64 hb_sum(struct node *node) {
 }
 
 static u64 run_heartbeat(struct node *root, const struct kconfig *cfg) {
-    hb_init(cfg->nthreads, cfg->heartbeat);
+    hb_runtime_init(cfg->nthreads, cfg->heartbeat);
     u64 sum = hb_sum(root);
-    hb_shutdown();
+    hb_runtime_shutdown();
     return sum;
 }
 
