@@ -9,6 +9,8 @@ struct jobref {
     job *j;
     jobref *next, *prev;
 };
+// ============================= HEARTBEAT
+bool beat();
 // ============================= FORK
 void hb_fork(jobref *j);
 
@@ -16,5 +18,5 @@ void hb_fork(jobref *j);
 void hb_join(jobref *jr);
 
 // ============================= INIT/SHUTDOWN
-void hb_init(size_t nt, u64 interval);
-void hb_shutdown();
+void hb_runtime_init(size_t nt, u64 interval);
+void hb_runtime_shutdown();

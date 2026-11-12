@@ -21,6 +21,12 @@ static _Thread_local thread_state ts;
 // ============================= HEARTBEAT
 static u64 beat_interval;
 
+/*
+ * Increments beat count.
+ * If count is over the beat interval, resets beat count and returns true.
+ * Otherwise, returns false.
+ * TODO: change this to a clock (currently beats once per loop iteration)
+ */
 bool beat() {
     if (++ts.beat_count >= beat_interval) {
         ts.beat_count = 0;
@@ -73,15 +79,19 @@ void promote() {
     }
 }
 
-void hb_fork(jobref *j) {
-    j->j->done = 0;
-    enque(j);
+void hb_fork(jobref *jr) {
+    jr->j->done = 0;
+    enque(jr);
     if (beat()) {
         promote();
     }
 }
 
 // ============================= JOIN
+/*
+ * Joins job j.
+ * If j was claimed, does some other work while waiting for j to finish.
+ */
 void hb_join(jobref *jr) {
     if (ts.pj.head == jr) {
         job *j = ts.pj.head->j;
@@ -98,9 +108,9 @@ void hb_join(jobref *jr) {
 }
 
 // ============================= INIT/SHUTDOWN
-void hb_init(size_t nt, u64 interval) {
+void hb_runtime_init(size_t nt, u64 interval) {
     beat_interval = interval;
     ws_init(nt);
 }
 
-void hb_shutdown() { ws_shutdown(); }
+void hb_runtime_shutdown() { ws_shutdown(); }
