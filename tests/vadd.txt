@@ -1,0 +1,9 @@
+vadd-0          vadd  0
+vadd-1          vadd  1
+vadd-1001       vadd  1001
+vadd-10k        vadd  10000
+vadd-1m         vadd  1000000
+vadd-10m        vadd  10000000
+vadd-1m-w10     vadd  1000000   1  10
+vadd-1m-w100    vadd  1000000   1  100
+vadd-100k-w1000 vadd  100000    1  1000

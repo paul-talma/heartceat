@@ -1,0 +1,9 @@
+arr      array   40000000
+arr-1m   array   1000000
+arr-10k  array   10000
+onerow   rows    1 40000000
+tall     rows    20000000 1
+square   rows    6000 6000
+jagged   jagged  80000 1000
+tri      tri     9000
+spike    spike   1000000 40000000

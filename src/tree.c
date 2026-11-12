@@ -2,27 +2,11 @@
 
 #include <ctype.h>
 #include <errno.h>
-#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "util.h"
-
-static int fail(char *err, size_t errlen, const char *fmt, ...) {
-    va_list ap;
-    va_start(ap, fmt);
-    vsnprintf(err, errlen, fmt, ap);
-    va_end(ap);
-    return -1;
-}
-
-static u64 next_rand(u64 *s) {
-    u64 z = (*s += 0x9e3779b97f4a7c15ULL);
-    z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ULL;
-    z = (z ^ (z >> 27)) * 0x94d049bb133111ebULL;
-    return z ^ (z >> 31);
-}
 
 static struct node *new_node(struct node **next, u64 *rng) {
     struct node *n = (*next)++;
@@ -49,24 +33,6 @@ static struct node *build_perfect(struct node **next, u64 height, u64 *rng) {
     n->left = build_perfect(next, height - 1, rng);
     n->right = build_perfect(next, height - 1, rng);
     return n;
-}
-
-static int parse_u64(const char *s, u64 *out) {
-    char *end;
-    errno = 0;
-    unsigned long long v = strtoull(s, &end, 10);
-    if (errno || end == s || *end || *s == '-')
-        return -1;
-    *out = v;
-    return 0;
-}
-
-static int arg_u64(int argc, char **argv, int i, u64 def, u64 *out) {
-    if (i >= argc) {
-        *out = def;
-        return 0;
-    }
-    return parse_u64(argv[i], out);
 }
 
 static const char *scan(const char **p, size_t *len) {
