@@ -1,8 +1,10 @@
 #include "kernels.h"
 #include "forkjoin.h"
 #include "heartbeat.h"
+#include "heartbeat_loops.h"
 #include <string.h>
 
+#define ARRAY_SIZE (1 << 20)
 #define MAX_DEPTH 8
 
 typedef struct {
@@ -111,21 +113,80 @@ static u64 run_heartbeat(struct node *root, const struct kconfig *cfg) {
     return sum;
 }
 
+// =========================================== LOOPS
+// =========================================== SERIAL
+
+static u64 run_serial_flat_loop(const struct array *a,
+                                const struct kconfig *cfg) {
+    u64 sum = 0;
+    for (size_t i = 0; i < a->n; ++i) {
+        sum += a->val[i];
+    }
+    return sum;
+}
+
+// =========================================== HB
+static void body(void *arg_, size_t i) {
+    body_arg *arg = arg_;
+    u64 *a = arg->a;
+    u64 *b = arg->b;
+    u64 *c = arg->c;
+    a[i] = vadd_op(b[i], c[i], arg->work);
+}
+
+static void run_serial_vadd(const struct vadd *v, const struct kconfig *cfg) {
+    (void)cfg;
+    for (u64 i = 0; i < v->n; ++i)
+        v->out[i] = vadd_op(v->b[i], v->c[i], v->work);
+}
+
+static void run_heartbeat_vadd(const struct vadd *v,
+                               const struct kconfig *cfg) {
+    body_arg ctx = {
+        .a = v->out,
+        .b = v->b,
+        .c = v->c,
+        .work = v->work,
+    };
+    _Atomic size_t pending = 1;
+    ld ld = {
+        .cur = 0,
+        .high = v->n,
+        .body = body,
+        .ctx = &ctx,
+        .pending = &pending,
+    };
+    hb_runtime_init(cfg->nthreads, cfg->heartbeat);
+    hb_loop(&ld);
+    hb_runtime_shutdown();
+}
+
 // =========================================== KERNELS
 
 const struct kernel kernels[] =
-    {{.name = "serial",
-      .desc = "computes the sum serially",
-      .run = run_serial,
-      .max_depth = 100000},
-     {.name = "fork-join",
-      .desc = "computes the sum in parallel using fork join",
-      .run = run_fork_join,
-      .max_depth = 100000},
-     {.name = "heartbeat",
-      .desc = "computes the sum in parallel using heartbeat scheduling",
-      .run = run_heartbeat,
-      .max_depth = 100000}}
+    {
+        {.name = "serial",
+         .desc = "computes the sum serially",
+         .run_tree = run_serial,
+         .max_depth = 100000},
+        {.name = "fork-join",
+         .desc = "computes the sum in parallel using fork join",
+         .run_tree = run_fork_join,
+         .max_depth = 100000},
+        {.name = "heartbeat",
+         .desc = "computes the sum in parallel using heartbeat scheduling",
+         .run_tree = run_heartbeat,
+         .max_depth = 100000},
+        {.name = "serial_flat_loop",
+         .desc = "sums an array serially",
+         .run_flat = run_serial_flat_loop},
+        {.name = "serial_vadd",
+         .desc = "vector addition, serial",
+         .run_vadd = run_serial_vadd},
+        {.name = "heartbeat_vadd",
+         .desc = "vector addition, heartbeat loop",
+         .run_vadd = run_heartbeat_vadd},
+}
 
 ;
 

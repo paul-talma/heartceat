@@ -23,14 +23,23 @@ static void usage(FILE *f, const char *prog) {
             "\n"
             "cases file: one case per line, '#' starts a comment\n"
             "  NAME KIND ARGS... [expect=SUM]\n"
-            "kinds:\n"
+            "tree kinds (run by kernels with .run_tree):\n"
             "  file PATH                          preorder tokens: integer value, '.' empty\n"
             "                                     (PATH is relative to the cases file)\n"
             "  perfect HEIGHT [SEED]\n"
             "  random NODES [SEED]                each node added at the end of a random walk\n"
             "  chain NODES [left|right] [SEED]\n"
             "  chains HEIGHT PATHS LENGTH [SEED]  perfect tree plus random-direction paths\n"
-            "  spine LENGTH HEIGHT [SEED]         left chain ending in a perfect tree\n",
+            "  spine LENGTH HEIGHT [SEED]         left chain ending in a perfect tree\n"
+            "flat loop kinds (run by kernels with .run_flat; sum of an array):\n"
+            "  array N [SEED]\n"
+            "vector add kinds (run by kernels with .run_vadd; out[i] = b[i] + c[i], checked per element):\n"
+            "  vadd N [SEED] [WORK]               WORK extra multiply-adds per element (default 0)\n"
+            "nested loop kinds (run by kernels with .run_nested; sum of a jagged 2D array):\n"
+            "  rows ROWS LEN [SEED]               every row has LEN items\n"
+            "  jagged ROWS MAXLEN [SEED]          row lengths uniform in [0, MAXLEN]\n"
+            "  tri ROWS [SEED]                    row i has i items\n"
+            "  spike ROWS LEN [SEED]              all rows empty except the middle one\n",
             prog);
 }
 
@@ -198,8 +207,19 @@ int main(int argc, char **argv) {
 
     if (list) {
         printf("kernels:\n");
-        for (int i = 0; i < nkernels; i++)
-            printf("  %-12s %s\n", kernels[i].name, kernels[i].desc);
+        for (int i = 0; i < nkernels; i++) {
+            const struct kernel *k = &kernels[i];
+            char kinds[32] = "";
+            if (k->run_tree)
+                strcat(kinds, ",tree");
+            if (k->run_flat)
+                strcat(kinds, ",flat");
+            if (k->run_nested)
+                strcat(kinds, ",nested");
+            if (k->run_vadd)
+                strcat(kinds, ",vadd");
+            printf("  %-12s %-18s %s\n", k->name, kinds[0] ? kinds + 1 : "-", k->desc);
+        }
         printf("cases:\n");
         for (int i = 0; i < ncases; i++)
             printf("  %-12s %s%s\n", cs[i].name, cs[i].spec, cs[i].has_expect ? " (expect)" : "");
