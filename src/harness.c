@@ -10,13 +10,28 @@
 
 #include "util.h"
 
-enum status { RUN_OK, RUN_WRONG, RUN_SKIP, RUN_FAIL };
+enum status { RUN_OK, RUN_WRONG, RUN_SKIP, RUN_FAIL, RUN_NA };
+
+enum wkind { W_TREE, W_FLAT, W_NESTED, W_VADD };
+
+static const char *wnames[] = {"tree", "flat loop", "nested loop", "vector add"};
+
+struct workload {
+    enum wkind kind;
+    struct tree t;
+    struct array f;
+    struct jagged a;
+    struct vadd v;
+    u64 sum;
+    u64 items;
+};
 
 struct result {
     enum status status;
     double median;
     double min;
     u64 got;
+    u64 bad;
 };
 
 static char *xstrdup(const char *s) {
@@ -175,13 +190,126 @@ static int cmp_double(const void *a, const void *b) {
     return (x > y) - (x < y);
 }
 
+static int workload_build(struct workload *w, const struct tcase *c, char *err, size_t errlen) {
+    memset(w, 0, sizeof *w);
+    if (c->argc >= 1 && array_is_kind(c->argv[0])) {
+        w->kind = W_FLAT;
+        if (array_build(&w->f, c->argc, c->argv, err, errlen))
+            return -1;
+        array_stats(&w->f);
+        w->sum = w->f.sum;
+        w->items = w->f.n;
+        return 0;
+    }
+    if (c->argc >= 1 && jagged_is_kind(c->argv[0])) {
+        w->kind = W_NESTED;
+        if (jagged_build(&w->a, c->argc, c->argv, err, errlen))
+            return -1;
+        jagged_stats(&w->a);
+        w->sum = w->a.sum;
+        w->items = w->a.items;
+        return 0;
+    }
+    if (c->argc >= 1 && vadd_is_kind(c->argv[0])) {
+        w->kind = W_VADD;
+        if (vadd_build(&w->v, c->argc, c->argv, err, errlen))
+            return -1;
+        w->sum = w->v.sum;
+        w->items = w->v.n;
+        return 0;
+    }
+    if (tree_build(&w->t, c->argc, c->argv, err, errlen))
+        return -1;
+    tree_stats(&w->t);
+    w->sum = w->t.sum;
+    w->items = w->t.nodes;
+    return 0;
+}
+
+static void workload_print(const struct workload *w, double built) {
+    if (w->kind == W_FLAT)
+        printf("  items %llu, sum %llu, built in %.0f ms\n", (unsigned long long)w->f.n,
+               (unsigned long long)w->sum, built * 1e3);
+    else if (w->kind == W_VADD)
+        printf("  items %llu, checksum %llu, built in %.0f ms\n", (unsigned long long)w->v.n,
+               (unsigned long long)w->sum, built * 1e3);
+    else if (w->kind == W_NESTED)
+        printf("  rows %llu, items %llu, longest row %llu, sum %llu, built in %.0f ms\n",
+               (unsigned long long)w->a.rows, (unsigned long long)w->a.items,
+               (unsigned long long)w->a.longest, (unsigned long long)w->sum, built * 1e3);
+    else
+        printf("  nodes %llu, depth %llu, sum %llu, built in %.0f ms\n",
+               (unsigned long long)w->t.nodes, (unsigned long long)w->t.depth,
+               (unsigned long long)w->sum, built * 1e3);
+}
+
+static void workload_free(struct workload *w) {
+    switch (w->kind) {
+    case W_TREE:
+        tree_free(&w->t);
+        break;
+    case W_FLAT:
+        array_free(&w->f);
+        break;
+    case W_NESTED:
+        jagged_free(&w->a);
+        break;
+    case W_VADD:
+        vadd_free(&w->v);
+        break;
+    }
+}
+
+static int supports(const struct kernel *k, enum wkind kind) {
+    switch (kind) {
+    case W_TREE:
+        return k->run_tree != NULL;
+    case W_FLAT:
+        return k->run_flat != NULL;
+    case W_NESTED:
+        return k->run_nested != NULL;
+    case W_VADD:
+        return k->run_vadd != NULL;
+    }
+    return 0;
+}
+
+static u64 run_once(const struct kernel *k, const struct workload *w, const struct kconfig *cfg) {
+    switch (w->kind) {
+    case W_FLAT:
+        return k->run_flat(&w->f, cfg);
+    case W_NESTED:
+        return k->run_nested(&w->a, cfg);
+    case W_VADD:
+        k->run_vadd(&w->v, cfg);
+        return 0;
+    case W_TREE:
+        break;
+    }
+    return k->run_tree(w->t.root, cfg);
+}
+
+static int verify(struct workload *w, u64 ret, struct result *r) {
+    if (w->kind != W_VADD) {
+        r->got = ret;
+        return ret == w->sum;
+    }
+    r->bad = vadd_check(&w->v, &r->got);
+    vadd_poison(&w->v);
+    return r->bad == 0;
+}
+
 static void run_kernel(const struct kernel *k,
-                       const struct tree *t,
+                       struct workload *w,
                        const struct hconfig *cfg,
                        double *times,
                        struct result *r) {
     memset(r, 0, sizeof *r);
-    if (k->max_depth && t->depth > k->max_depth) {
+    if (!supports(k, w->kind)) {
+        r->status = RUN_NA;
+        return;
+    }
+    if (w->kind == W_TREE && k->max_depth && w->t.depth > k->max_depth) {
         r->status = RUN_SKIP;
         return;
     }
@@ -190,17 +318,17 @@ static void run_kernel(const struct kernel *k,
         return;
     }
     r->status = RUN_OK;
-    u64 got = k->run(t->root, &cfg->k);
-    for (int i = 0; got == t->sum && i < cfg->reps; i++) {
+    int ok = verify(w, run_once(k, w, &cfg->k), r);
+    for (int i = 0; ok && i < cfg->reps; i++) {
         double t0 = now();
-        got = k->run(t->root, &cfg->k);
+        u64 ret = run_once(k, w, &cfg->k);
         times[i] = now() - t0;
+        ok = verify(w, ret, r);
     }
     if (k->fini)
         k->fini();
-    if (got != t->sum) {
+    if (!ok) {
         r->status = RUN_WRONG;
-        r->got = got;
         return;
     }
     qsort(times, (size_t)cfg->reps, sizeof *times, cmp_double);
@@ -210,20 +338,29 @@ static void run_kernel(const struct kernel *k,
 }
 
 static void print_row(const struct kernel *k,
-                      const struct tree *t,
+                      const struct workload *w,
                       const struct result *r,
                       const struct result *base) {
     printf("  %-12s ", k->name);
     switch (r->status) {
     case RUN_SKIP:
         printf("%10s %10s %8s %8s  skipped: depth %llu > %llu\n", "-", "-", "-",
-               "-", (unsigned long long)t->depth,
+               "-", (unsigned long long)w->t.depth,
                (unsigned long long)k->max_depth);
         return;
     case RUN_FAIL:
         printf("%10s %10s %8s %8s  init failed\n", "-", "-", "-", "-");
         return;
+    case RUN_NA:
+        printf("%10s %10s %8s %8s  no %s implementation\n", "-", "-", "-", "-",
+               wnames[w->kind]);
+        return;
     case RUN_WRONG:
+        if (w->kind == W_VADD) {
+            printf("%10s %10s %8s %8s  WRONG: %llu of %llu elements\n", "-", "-", "-", "-",
+                   (unsigned long long)r->bad, (unsigned long long)w->v.n);
+            return;
+        }
         printf("%10s %10s %8s %8s  WRONG: got %llu\n", "-", "-", "-", "-",
                (unsigned long long)r->got);
         return;
@@ -231,8 +368,8 @@ static void print_row(const struct kernel *k,
         break;
     }
     printf("%10.3f %10.3f ", r->median * 1e3, r->min * 1e3);
-    if (t->nodes)
-        printf("%8.2f ", r->median * 1e9 / (double)t->nodes);
+    if (w->items)
+        printf("%8.2f ", r->median * 1e9 / (double)w->items);
     else
         printf("%8s ", "-");
     if (base->status == RUN_OK && r->median > 0)
@@ -266,7 +403,7 @@ static void print_summary(const struct tcase *cs,
     }
     printf("\n");
 
-    static const char *labels[] = {"", "WRONG", "n/a", "FAIL"};
+    static const char *labels[] = {"", "WRONG", "n/a", "FAIL", "-"};
     for (int i = 0; i < ncases; i++) {
         const struct result *base = &res[i * nks];
         printf("%-*s  ", namew, cs[i].name);
@@ -328,7 +465,7 @@ int harness_run(const struct tcase *cs,
     for (int i = 0; i < ncases; i++) {
         const struct tcase *c = &cs[i];
         struct result *row = &res[i * nks];
-        struct tree t;
+        struct workload w;
         char err[512];
 
         if (strcmp(c->name, c->spec))
@@ -337,7 +474,7 @@ int harness_run(const struct tcase *cs,
             printf("\n== %s\n", c->spec);
         fflush(stdout);
         double t0 = now();
-        if (tree_build(&t, c->argc, c->argv, err, sizeof err)) {
+        if (workload_build(&w, c, err, sizeof err)) {
             printf("  build failed: %s\n", err);
             for (int j = 0; j < nks; j++)
                 row[j] = (struct result){.status = RUN_FAIL};
@@ -345,24 +482,21 @@ int harness_run(const struct tcase *cs,
             continue;
         }
         double built = now() - t0;
-        tree_stats(&t);
-        printf("  nodes %llu, depth %llu, sum %llu, built in %.0f ms\n",
-               (unsigned long long)t.nodes, (unsigned long long)t.depth,
-               (unsigned long long)t.sum, built * 1e3);
-        if (c->has_expect && c->expect != t.sum) {
+        workload_print(&w, built);
+        if (c->has_expect && c->expect != w.sum) {
             printf("  EXPECTED sum %llu\n", (unsigned long long)c->expect);
             bad = 1;
         }
         printf("  %-12s %10s %10s %8s %8s  %s\n", "kernel", "median ms",
-               "min ms", "ns/node", "speedup", "check");
+               "min ms", "ns/item", "speedup", "check");
         for (int j = 0; j < nks; j++) {
-            run_kernel(ks[j], &t, cfg, times, &row[j]);
+            run_kernel(ks[j], &w, cfg, times, &row[j]);
             if (row[j].status == RUN_WRONG || row[j].status == RUN_FAIL)
                 bad = 1;
-            print_row(ks[j], &t, &row[j], &row[0]);
+            print_row(ks[j], &w, &row[j], &row[0]);
             fflush(stdout);
         }
-        tree_free(&t);
+        workload_free(&w);
     }
 
     print_summary(cs, ncases, ks, nks, res);
