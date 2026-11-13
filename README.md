@@ -28,14 +28,14 @@ WIP
 
 Core library:
 
-- `src/work_stealing.{h,c}`: a work stealing scheduler. Defines the thread abstraction (`job`) and exposes a `push/pop` API for workers to manage their threads.
-- `src/forkjoin.{h,c}`: a simple fork-join parallel runtime, allowing the client program to create, `fork`, and `join` tasks.
+- `src/work_stealing.{h,c}`: a work stealing scheduler. Defines the thread abstraction (`job`) and exposes a `push`/`pop` API for workers to manage their threads.
+- `src/forkjoin.{h,c}`: a simple fork-join parallel runtime, allowing the client program to `fork` and `join` tasks.
 - `src/heartbeat.{h,c}`: does the same for the heartbeat runtime.
 - `src/heartbeat_loops.{h,c}`: specializes the heartbeat scheduler for parallel loops, which allow for special treatment.
 
-Benchmarking harness:
+Benchmarking harness (written by Claude):
 
-- `src/harness.{h,c}`: testing harness. Handles command line arguments, loads test cases, runs kernels, times and displays results. Written by Claude.
+- `src/harness.{h,c}`: testing harness. Handles command line arguments, loads test cases, runs kernels, times and displays results.
 - `src/kernels.{h,c}`: define various kernels using the fork-join and heartbeat APIs.
 - `src/loops.{h,c}`, `src/tree.{h,c}`, `src/types.h`, `src/util.h`: utilities for generating test cases; type defs for common types.
 
