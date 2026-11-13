@@ -66,3 +66,8 @@ Options:
 - `-r N`: timed repetitions per kernel, after one warmup run (default 5).
 - `-p N`: number of worker threads (default: online cores).
 - `-H N`: heartbeat interval, counted in calls to `beat()` (default 1000).
+
+## TODOs
+
+- [ ] The memory allocated to jobs is currently leaked
+- [ ] The heartbeat is not clocked. Instead, it increments a counter at each loop iteration, resulting in uneven performance as work per iteration changes.
